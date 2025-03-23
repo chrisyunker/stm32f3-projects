@@ -16,7 +16,7 @@ use core::pin::pin;
 use cortex_m_rt::entry;
 use futures::{select_biased, FutureExt};
 use panic_rtt_target as _;
-use rtt_target::{rprintln, rtt_init_print};
+use rtt_target::rtt_init_print;
 use stm32f3xx_hal::{gpio::gpioe::Parts, pac, prelude::*};
 
 const DEBOUNCE_MSEC: u32 = 100;
@@ -73,9 +73,9 @@ async fn async_led_task(mut gpioe: Parts, mut receiver: Receiver<'_, bool>) {
     );
     loop {
         select_biased! {
-            value = receiver.receive().fuse() => {
+            _ = receiver.receive().fuse() => {
                 led.rotate();
-            },
+            }
         }
     }
 }
