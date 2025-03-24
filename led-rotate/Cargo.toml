@@ -1,33 +1,33 @@
 [package]
 authors = ["Chris Yunker <cyunker@riotgames.com>"]
-edition = "2018"
+edition = "2021"
 readme = "README.md"
 name = "led-rotate"
 version = "0.1.0"
 
 [dependencies]
+embassy-stm32 = { version = "0.2.0", features = [
+    "stm32f303vc",
+    "unstable-pac",
+    "memory-x",
+    "time-driver-tim2",
+    "exti",
+]}
+embassy-sync = "0.6.2"
+embassy-executor = { version = "0.7.0", features = [
+    "arch-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+] }
+embassy-time = "0.4.0"
+embassy-futures = "0.1.0"
+
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
-cortex-m-semihosting = "0.5"
-critical-section = "1.2.0"
-heapless = { version = "0.8.0", features = ["portable-atomic"] }
-panic-halt = "1.0.0"
+embedded-hal = "0.2.6"
+panic-probe = { version = "0.3" }
 panic-rtt-target = "0.2.0"
 rtt-target = "0.6.1"
-switch-hal = "0.4.0"
-
-[dependencies.futures]
-version = "0.3.30"
-default-features = false
-features = ["async-await"]
-
-[dependencies.stm32f3]
-features = ["stm32f303"]
-version = "0.15.1"
-
-[dependencies.stm32f3xx-hal]
-features = ["stm32f303xc", "rt"]
-version = "0.10"
 
 # this lets you use `cargo fix`!
 [[bin]]

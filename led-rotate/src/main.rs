@@ -1,89 +1,95 @@
 #![no_std]
 #![no_main]
 
-mod button;
-mod channel;
-mod executor;
 mod led;
-mod time;
+use led::Leds;
 
-use button::{button_init, button_wait};
-use channel::{Channel, Receiver, Sender};
-use led::LedTask;
-use time::Ticker;
-
-use core::pin::pin;
-use cortex_m_rt::entry;
-use futures::{select_biased, FutureExt};
 use panic_rtt_target as _;
-use rtt_target::rtt_init_print;
-use stm32f3xx_hal::{gpio::gpioe::Parts, pac, prelude::*};
+use rtt_target::{rprintln, rtt_init_print};
 
-const DEBOUNCE_MSEC: u32 = 100;
+use embassy_executor::Spawner;
+use embassy_stm32::{
+    exti::ExtiInput,
+    gpio::{Level, Output, Pull, Speed},
+};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
+use embassy_time::{with_timeout, Duration};
 
-#[entry]
-fn main() -> ! {
-    rtt_init_print!();
+const DOUBLE_CLICK_DELAY: u64 = 250;
+const HOLD_DELAY: u64 = 1000;
 
-    let dp = pac::Peripherals::take().unwrap();
-    let cp = cortex_m::Peripherals::take().unwrap();
+static CHANNEL: Channel<ThreadModeRawMutex, ButtonEvent, 4> = Channel::new();
 
-    let mut rcc = dp.RCC.constrain();
-    let mut flash = dp.FLASH.constrain();
-
-    let clocks = rcc
-        .cfgr
-        .use_hse(8.MHz())
-        .sysclk(48.MHz())
-        .use_pll()
-        .pclk1(24.MHz())
-        .pclk2(24.MHz())
-        .freeze(&mut flash.acr);
-
-    Ticker::init(cp.SYST, dp.TIM2, clocks, &mut rcc.apb1);
-
-    let channel = Channel::new();
-
-    let mut gpioa = dp.GPIOA.split(&mut rcc.ahb);
-    gpioa
-        .pa0
-        .into_pull_down_input(&mut gpioa.moder, &mut gpioa.pupdr);
-
-    let gpioe = dp.GPIOE.split(&mut rcc.ahb);
-    let led_task = pin!(async_led_task(gpioe, channel.get_receiver(),));
-
-    button_init();
-    let button_task = pin!(async_button_task(channel.get_sender()));
-
-    executor::run_tasks(&mut [led_task, button_task]);
+#[derive(Debug)]
+pub enum ButtonEvent {
+    Hold,
+    SingleClick,
+    DoubleClick,
 }
 
-async fn async_led_task(mut gpioe: Parts, mut receiver: Receiver<'_, bool>) {
-    let mut led = LedTask::new(
-        gpioe.pe8,
-        gpioe.pe9,
-        gpioe.pe10,
-        gpioe.pe11,
-        gpioe.pe12,
-        gpioe.pe13,
-        gpioe.pe14,
-        gpioe.pe15,
-        &mut gpioe.moder,
-        &mut gpioe.otyper,
-    );
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    rtt_init_print!();
+
+    let p = embassy_stm32::init(Default::default());
+
+    let leds = [
+        Output::new(p.PE8, Level::Low, Speed::Low),
+        Output::new(p.PE9, Level::Low, Speed::Low),
+        Output::new(p.PE10, Level::Low, Speed::Low),
+        Output::new(p.PE11, Level::Low, Speed::Low),
+        Output::new(p.PE12, Level::Low, Speed::Low),
+        Output::new(p.PE13, Level::Low, Speed::Low),
+        Output::new(p.PE14, Level::Low, Speed::Low),
+        Output::new(p.PE15, Level::Low, Speed::Low),
+    ];
+
+    let leds = Leds::new(leds);
+    spawner.spawn(blink(leds)).unwrap();
+
+    let button = ExtiInput::new(p.PA0, p.EXTI0, Pull::Down);
+    spawner.spawn(button_task(button)).unwrap();
+}
+
+#[embassy_executor::task]
+async fn button_task(mut button: ExtiInput<'static>) {
+    button.wait_for_rising_edge().await;
     loop {
-        select_biased! {
-            _ = receiver.receive().fuse() => {
-                led.rotate();
-            }
+        if with_timeout(
+            Duration::from_millis(HOLD_DELAY),
+            button.wait_for_falling_edge(),
+        )
+        .await
+        .is_err()
+        {
+            rprintln!("[button] Hold");
+            CHANNEL.send(ButtonEvent::Hold).await;
+            button.wait_for_falling_edge().await;
+        } else if with_timeout(
+            Duration::from_millis(DOUBLE_CLICK_DELAY),
+            button.wait_for_rising_edge(),
+        )
+        .await
+        .is_err()
+        {
+            rprintln!("[button] Single click");
+            CHANNEL.send(ButtonEvent::SingleClick).await;
+        } else {
+            rprintln!("[button] Double click");
+            CHANNEL.send(ButtonEvent::DoubleClick).await;
+            button.wait_for_falling_edge().await;
         }
+        button.wait_for_rising_edge().await;
     }
 }
 
-async fn async_button_task(sender: Sender<'_, bool>) {
+#[embassy_executor::task]
+async fn blink(mut leds: Leds<'static>) {
     loop {
-        button_wait().await;
-        sender.send(true);
-        time::delay(DEBOUNCE_MSEC).await;
+        leds.set_high();
+        if let Ok(event) = with_timeout(Duration::from_millis(500), CHANNEL.receive()).await {
+            leds.set_low();
+            leds.process_event(event).await;
+        }
     }
 }
