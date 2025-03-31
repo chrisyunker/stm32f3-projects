@@ -2,7 +2,7 @@
 authors = ["Chris Yunker <chrisyunker@gmail.com>"]
 edition = "2021"
 readme = "README.md"
-name = "led-rotate"
+name = "led-compass"
 version = "0.1.0"
 
 [dependencies]
@@ -28,10 +28,13 @@ embedded-hal = "0.2.6"
 panic-probe = { version = "0.3" }
 panic-rtt-target = "0.2.0"
 rtt-target = "0.6.1"
+lsm303dlhc = "0.2.0"
+
+
 
 # this lets you use `cargo fix`!
 [[bin]]
-name = "led-rotate"
+name = "led-compass"
 test = false
 bench = false
 
